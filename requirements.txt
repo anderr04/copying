@@ -1,0 +1,14 @@
+# Core
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Data & analysis
+pandas>=2.1.0
+
+# Blockchain (Web3) – Copy-Trading module
+web3>=6.15.0
+websockets>=12.0
+aiohttp>=3.9.0
+
+# (Optional) For live execution
+# py-clob-client>=0.1.0

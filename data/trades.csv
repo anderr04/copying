@@ -1,0 +1,2 @@
+timestamp_open,timestamp_close,market_id,market_question,side,entry_price,exit_price,shares,cost,pnl,exit_reason,capital_after,ob_imbalance,yes_liquidity,no_liquidity,entry_spread_pct,time_elapsed_s,spike_velocity,vwap_slip_impact
+2026-02-26 18:49:26 UTC,2026-02-26 18:49:26 UTC,,=== BOT RESTART === open_pos=0 capital=$50.00,,,,,,0.0000,RESTART,50.0000,,,,,,,
