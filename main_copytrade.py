@@ -236,6 +236,7 @@ def main() -> None:
     signals_count = 0
     last_status = time.time()
     last_loud_status = time.time()
+    last_resolution_check = 0.0  # force first check on startup
 
     try:
         while not _shutdown:
@@ -254,6 +255,28 @@ def main() -> None:
                     trade_logger.log_trade(
                         last_trade, capital_after=trader.available_capital,
                     )
+
+            # ── Market Resolution Reaper ─────────────────────────
+            if time.time() - last_resolution_check > config.RESOLUTION_CHECK_INTERVAL_S:
+                try:
+                    resolved = engine.check_resolved_markets()
+                    for r in resolved:
+                        _print_resolution(r)
+                        whale_label = r.whale_label
+                        trader = whale_traders.get(whale_label)
+                        if trader and trader.closed_trades:
+                            last_trade = trader.closed_trades[-1]
+                            trade_logger.log_trade(
+                                last_trade,
+                                capital_after=trader.available_capital,
+                            )
+                    if resolved:
+                        # Save state immediately after resolutions
+                        for trader in whale_traders.values():
+                            trader._save_state()
+                except Exception as exc:
+                    logger.error("Error in resolution reaper: %s", exc)
+                last_resolution_check = time.time()
 
             try:
                 sig = signal_queue.get(timeout=1.0)
@@ -285,40 +308,47 @@ def main() -> None:
         # Snapshot CSV before any shutdown processing
         trade_logger.snapshot_csv()
 
-        # Auto-liquidar TODAS las posiciones abiertas por whale
+        # ── 1) Run resolution reaper one last time before shutdown ─────
+        #    Resolved markets close at $1/$0 (no friction), which is the
+        #    correct settlement price. This must happen BEFORE any
+        #    orderbook-based liquidation.
+        try:
+            logger.info("🏁 Running final resolution check before shutdown…")
+            resolved = engine.check_resolved_markets()
+            for r in resolved:
+                _print_resolution(r)
+                whale_label = r.whale_label
+                trader = whale_traders.get(whale_label)
+                if trader and trader.closed_trades:
+                    last_trade = trader.closed_trades[-1]
+                    trade_logger.log_trade(
+                        last_trade, capital_after=trader.available_capital,
+                    )
+            if resolved:
+                logger.info("🏁 Resolved %d positions at settlement.", len(resolved))
+        except Exception as exc:
+            logger.error("Error in final resolution check: %s", exc)
+
+        # ── 2) Report remaining open positions (do NOT force-liquidate) ──
+        #    Positions in still-active markets are preserved on disk so the
+        #    bot can resume tracking them after restart. Force-liquidating
+        #    at an arbitrary orderbook bid would produce fake PnL.
         for label, trader in whale_traders.items():
             open_pos = list(trader.open_positions.items())
             if open_pos:
                 print()
                 print("=" * 68)
-                print(f"  🔻 SHUTDOWN: LIQUIDANDO TODAS LAS POSICIONES ABIERTAS ({label})")
+                print(f"  📦 SHUTDOWN: {len(open_pos)} POSICIONES ABIERTAS PRESERVADAS ({label})")
                 print("=" * 68)
                 for token_id, pos in open_pos:
-                    try:
-                        snap = engine._get_orderbook(token_id)
-                        exit_price = snap.best_bid if snap else pos.entry_price
-                    except Exception:
-                        exit_price = pos.entry_price
-                    closed = trader.close_trade(
-                        exit_price=exit_price,
-                        reason="BOT_SHUTDOWN",
-                        is_maker=False,
-                        token_id=token_id,
-                    )
-                    if closed:
-                        trade_logger.log_trade(
-                            closed, capital_after=trader.available_capital,
-                        )
-                        print(f"  ✅ Cerrada: {pos.side.name} {pos.market_question[:40]} "
-                              f"│ entry={pos.entry_price:.4f} exit={exit_price:.4f} "
-                              f"│ PnL={closed.pnl:+.4f}")
-                    else:
-                        print(f"  ❌ Error cerrando: {token_id[:16]}…")
-                print(f"\n  Capital final ({label}): ${trader.available_capital:.2f}")
+                    age_h = (time.time() - pos.entry_time) / 3600
+                    print(f"  💤 {pos.side.name} {pos.market_question[:40]} "
+                          f"│ entry={pos.entry_price:.4f} │ cost=${pos.cost:.2f} "
+                          f"│ age={age_h:.1f}h")
+                print(f"\n  Capital libre ({label}): ${trader.available_capital:.2f}")
                 print("=" * 68)
 
-        engine._whale_positions.clear()
-        engine.save_whale_positions()
+        engine.save_whale_positions()  # preserve unresolved positions
         for trader in whale_traders.values():
             trader._save_state()
         logger.info("💾 State saved to disk.")
@@ -507,6 +537,26 @@ def _print_decision_from_result(result) -> None:
     ))
     if result.reason:
         print(f"  └─ {result.reason}")
+
+
+_RESOLUTION_FMT = (
+    "[{ts}] 🏁 RESOLVED | WHALE: {whale} | "
+    "ACTION: {action} | TOKEN: {token} | "
+    "ENTRY: {entry:.4f} → EXIT: {exit:.4f}"
+)
+
+
+def _print_resolution(result) -> None:
+    """Print a market resolution event."""
+    emoji = "✅" if "WIN" in result.action else "❌"
+    print(f"{emoji} " + _RESOLUTION_FMT.format(
+        ts=_ts(),
+        whale=result.whale_label,
+        action=result.action,
+        token=result.token_id[:20] + "…",
+        entry=result.whale_price,
+        exit=result.our_price,
+    ))
 
 
 # ── Entry point ──────────────────────────────────────────────────────

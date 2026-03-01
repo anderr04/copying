@@ -430,6 +430,14 @@ TOKEN_REGISTRY_REFRESH_S: float = float(os.getenv("TOKEN_REGISTRY_REFRESH_S", "3
 # Número máximo de eventos a cargar al inicio.
 TOKEN_REGISTRY_PRELOAD_LIMIT: int = int(os.getenv("TOKEN_REGISTRY_PRELOAD_LIMIT", "200"))
 
+# ── Market Resolution Reaper ────────────────────────────────────────
+# Intervalo entre checks de resolución de mercados (segundos).
+# El reaper consulta la Gamma API para cada posición abierta y cierra
+# automáticamente las que estén en mercados resueltos (closed=true).
+RESOLUTION_CHECK_INTERVAL_S: float = float(
+    os.getenv("RESOLUTION_CHECK_INTERVAL_S", "120.0")
+)
+
 # ── Web3 Listener (Zero-RPC) ─────────────────────────────────────────
 # Delay entre reconexiones WSS (con backoff exponencial).
 WEB3_RECONNECT_DELAY_S: float = float(os.getenv("WEB3_RECONNECT_DELAY_S", "5.0"))

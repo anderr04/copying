@@ -302,6 +302,91 @@ class TokenRegistry:
 
     # ── Token extraction (reutiliza lógica del PolymarketClient) ─
 
+    # ── Market Resolution Check ────────────────────────────────
+
+    def check_resolution(self, token_id: str) -> dict | None:
+        """
+        Query the Gamma API to check if a market is resolved.
+
+        Returns a dict with:
+            - closed: bool
+            - resolution_price: float (1.0 if our outcome won, 0.0 if lost)
+            - winning_outcome: str (name of the winning outcome)
+        Or None if the query fails.
+        """
+        try:
+            resp = self._session.get(
+                f"{self.gamma_url}/markets",
+                params={"clob_token_ids": token_id},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            markets = resp.json()
+
+            if not isinstance(markets, list) or not markets:
+                return None
+
+            raw_mkt = markets[0]
+            closed = raw_mkt.get("closed", False)
+
+            if not closed:
+                return {"closed": False, "resolution_price": None, "winning_outcome": None}
+
+            # Parse outcome prices and token IDs
+            outcome_prices_raw = raw_mkt.get("outcomePrices", "[]")
+            outcomes_raw = raw_mkt.get("outcomes", "[]")
+            clob_ids_raw = raw_mkt.get("clobTokenIds", "[]")
+
+            try:
+                outcome_prices = (
+                    _json.loads(outcome_prices_raw)
+                    if isinstance(outcome_prices_raw, str)
+                    else outcome_prices_raw
+                ) or []
+                outcomes = (
+                    _json.loads(outcomes_raw)
+                    if isinstance(outcomes_raw, str)
+                    else outcomes_raw
+                ) or []
+                clob_ids = (
+                    _json.loads(clob_ids_raw)
+                    if isinstance(clob_ids_raw, str)
+                    else clob_ids_raw
+                ) or []
+            except (_json.JSONDecodeError, TypeError):
+                logger.warning("Error parsing resolution data for token %s…", token_id[:20])
+                return None
+
+            # Find our token's index and resolution price
+            resolution_price = None
+            for i, tid in enumerate(clob_ids):
+                if str(tid) == token_id and i < len(outcome_prices):
+                    try:
+                        resolution_price = float(outcome_prices[i])
+                    except (ValueError, TypeError):
+                        resolution_price = None
+                    break
+
+            # Find the winning outcome (price == 1.0)
+            winning_outcome = None
+            for i, price_str in enumerate(outcome_prices):
+                try:
+                    if float(price_str) >= 0.99 and i < len(outcomes):
+                        winning_outcome = outcomes[i]
+                        break
+                except (ValueError, TypeError):
+                    continue
+
+            return {
+                "closed": True,
+                "resolution_price": resolution_price,
+                "winning_outcome": winning_outcome,
+            }
+
+        except requests.RequestException as exc:
+            logger.warning("Error checking resolution for token %s…: %s", token_id[:20], exc)
+            return None
+
     @staticmethod
     def _extract_tokens(raw_mkt: dict) -> list[tuple[str, str]]:
         """

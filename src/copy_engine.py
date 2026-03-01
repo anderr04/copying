@@ -258,7 +258,8 @@ class CopyTradeEngine:
 
         # Tracking
         self._whale_positions = {}
-        self._results = []
+        self._results = []          # capped – see _trim_results()
+        self._MAX_RESULTS = 500     # keep last N results in memory
         self._signals_processed = 0
         self._copies_executed = 0
         self._liquidations_executed = 0
@@ -887,6 +888,171 @@ class CopyTradeEngine:
         """
         return self.check_accumulations()
 
+    def check_resolved_markets(self) -> list[CopyTradeResult]:
+        """
+        Market Resolution Reaper.
+
+        Queries the Gamma API for each open position's market and auto-closes
+        positions in resolved markets at $1.00 (win) or $0.00 (loss).
+
+        Uses is_maker=True on close_trade (no friction at settlement —
+        markets pay out at exactly the resolution price).
+
+        Should be called periodically (every RESOLUTION_CHECK_INTERVAL_S),
+        NOT every 1s loop iteration.
+
+        Returns list of CopyTradeResults for resolved positions (for logging).
+        """
+        results: list[CopyTradeResult] = []
+        to_remove: list[str] = []  # whale_positions keys to remove after iteration
+
+        # Collect all unique token_ids from both whale_positions and paper traders
+        # to avoid redundant API calls
+        checked_tokens: dict[str, dict | None] = {}
+
+        # 1. Check positions tracked in _whale_positions
+        for pos_key, wp in list(self._whale_positions.items()):
+            token_id = wp.token_id
+            if not token_id:
+                continue
+
+            # Query resolution (with cache to avoid duplicate API calls)
+            if token_id not in checked_tokens:
+                checked_tokens[token_id] = self.registry.check_resolution(token_id)
+                time.sleep(0.2)  # rate limit: max 5 req/s to Gamma API
+
+            resolution = checked_tokens[token_id]
+            if resolution is None or not resolution.get("closed", False):
+                continue
+
+            # Market is resolved!
+            res_price = resolution.get("resolution_price")
+            winning_outcome = resolution.get("winning_outcome", "?")
+
+            if res_price is None:
+                logger.warning(
+                    "⚠️ Market closed but resolution price unknown for %s [%s]",
+                    wp.outcome, wp.market_question[:40],
+                )
+                continue
+
+            is_win = res_price >= 0.99
+            exit_price = 1.0 if is_win else 0.0
+            reason = f"MARKET_RESOLVED_{'WIN' if is_win else 'LOSS'}"
+
+            logger.info(
+                "🏁 RESOLVED │ %s │ %s [%s] │ outcome=%s │ winner=%s │ price=%.2f │ %s",
+                wp.whale_label,
+                wp.outcome,
+                wp.market_question[:40],
+                wp.outcome,
+                winning_outcome,
+                exit_price,
+                reason,
+            )
+
+            # Close the paper position if it exists
+            trader = self.whale_traders.get(wp.whale_label)
+            if trader and token_id in trader.open_positions:
+                closed_pos = trader.close_trade(
+                    exit_price=exit_price,
+                    reason=reason,
+                    is_maker=True,  # no friction at settlement
+                    token_id=token_id,
+                )
+                if closed_pos:
+                    result = CopyTradeResult(
+                        action=reason,
+                        whale_label=wp.whale_label,
+                        token_id=token_id,
+                        whale_price=wp.entry_price,
+                        our_price=exit_price,
+                    )
+                    results.append(result)
+                    logger.info(
+                        "✅ Position closed at $%.2f │ PnL=%.2f€ │ %s [%s] │ capital=%.2f€",
+                        exit_price, closed_pos.pnl,
+                        wp.outcome, wp.market_question[:40],
+                        trader.available_capital,
+                    )
+            else:
+                # Whale position tracked but no paper position (maybe already closed)
+                logger.info(
+                    "🏁 Market resolved but no paper position found │ %s │ %s [%s]",
+                    wp.whale_label, wp.outcome, wp.market_question[:40],
+                )
+
+            to_remove.append(pos_key)
+
+        # 2. Check paper trader positions NOT in _whale_positions
+        #    (safety net: catches orphaned positions)
+        for whale_label, trader in self.whale_traders.items():
+            for token_id in list(trader.open_positions.keys()):
+                # Skip if already checked via whale_positions above
+                if token_id in checked_tokens and checked_tokens[token_id] and checked_tokens[token_id].get("closed"):
+                    continue
+
+                if token_id not in checked_tokens:
+                    checked_tokens[token_id] = self.registry.check_resolution(token_id)
+                    time.sleep(0.2)
+
+                resolution = checked_tokens[token_id]
+                if resolution is None or not resolution.get("closed", False):
+                    continue
+
+                res_price = resolution.get("resolution_price")
+                winning_outcome = resolution.get("winning_outcome", "?")
+                if res_price is None:
+                    continue
+
+                is_win = res_price >= 0.99
+                exit_price = 1.0 if is_win else 0.0
+                reason = f"MARKET_RESOLVED_{'WIN' if is_win else 'LOSS'}"
+
+                pos = trader.open_positions[token_id]
+                logger.info(
+                    "🏁 RESOLVED (orphan) │ %s │ %s [%s] │ winner=%s │ price=%.2f",
+                    whale_label,
+                    pos.side.name,
+                    pos.market_question[:40],
+                    winning_outcome,
+                    exit_price,
+                )
+
+                closed_pos = trader.close_trade(
+                    exit_price=exit_price,
+                    reason=reason,
+                    is_maker=True,
+                    token_id=token_id,
+                )
+                if closed_pos:
+                    result = CopyTradeResult(
+                        action=reason,
+                        whale_label=whale_label,
+                        token_id=token_id,
+                        whale_price=pos.entry_price,
+                        our_price=exit_price,
+                    )
+                    results.append(result)
+
+        # 3. Clean up resolved whale_positions
+        for pos_key in to_remove:
+            if pos_key in self._whale_positions:
+                del self._whale_positions[pos_key]
+
+        if to_remove:
+            self.save_whale_positions()
+
+        if results:
+            logger.info(
+                "🏁 Resolution reaper: %d positions closed (%d win, %d loss)",
+                len(results),
+                sum(1 for r in results if "WIN" in r.action),
+                sum(1 for r in results if "LOSS" in r.action),
+            )
+
+        return results
+
     def check_accumulations(self) -> list[CopyTradeResult]:
         """
         Evalúa batches de acumulación listos (window expirado o instant trigger).
@@ -919,7 +1085,13 @@ class CopyTradeEngine:
             self._results.append(result)
             results.append(result)
 
+        self._trim_results()
         return results
+
+    def _trim_results(self) -> None:
+        """Keep only the last N results to prevent unbounded memory growth."""
+        if len(self._results) > self._MAX_RESULTS:
+            self._results = self._results[-self._MAX_RESULTS:]
 
     def get_tracked_positions(self) -> list[WhalePosition]:
         """Retorna las posiciones de ballenas que estamos copiando."""
