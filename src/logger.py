@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import logging.handlers
 import shutil
 import sys
 import time
@@ -168,9 +169,17 @@ def setup_logging(level: str = config.LOG_LEVEL) -> None:
     console.setFormatter(formatter)
     root.addHandler(console)
 
-    # File handler (mode='a' → append to preserve data across restarts)
+    # File handler – rotates at 20 MB, keeps 5 backups (≤ 100 MB total)
+    # Appends to existing log on restart (backupCount preserves history)
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(config.LOG_FILE, mode="a", encoding="utf-8")
+    file_handler = logging.handlers.RotatingFileHandler(
+        config.LOG_FILE,
+        mode="a",
+        maxBytes=20 * 1024 * 1024,   # 20 MB per file
+        backupCount=5,
+        encoding="utf-8",
+        delay=False,
+    )
     file_handler.setLevel(logging.DEBUG)  # always capture everything to file
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
