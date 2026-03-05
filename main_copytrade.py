@@ -243,14 +243,12 @@ def main() -> None:
             accum_results = engine.check_positions()
             for ar in accum_results:
                 _print_decision_from_result(ar)
+                # NOTE: COPIED = position OPENED. We do NOT log opens to CSV here.
+                # Closes are logged by the resolution reaper and whale-sell paths below.
+                # (Logging closed_trades[-1] here caused duplicate CSV entries.)
                 whale_label = ar.whale_label
                 trader = whale_traders.get(whale_label)
-                if ar.action == "COPIED" and trader and trader.closed_trades:
-                    last_trade = trader.closed_trades[-1]
-                    trade_logger.log_trade(
-                        last_trade, capital_after=trader.available_capital,
-                    )
-                if ar.action == "LIQUIDATED" and trader and trader.closed_trades:
+                if ar.action in ("LIQUIDATED", "PARTIAL_SELL") and trader and trader.closed_trades:
                     last_trade = trader.closed_trades[-1]
                     trade_logger.log_trade(
                         last_trade, capital_after=trader.available_capital,

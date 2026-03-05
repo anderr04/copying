@@ -192,6 +192,24 @@ class AccumulationTracker:
 
         accum.add_fill(size_usd, size_tokens, price, action, tx_hash)
 
+        # ── Reset copied flag when side flips (BUY→SELL or vice versa) ──
+        # After a BUY is copied, sell fills may arrive on the same accum.
+        # If we don't reset, check_ready() skips them (copied=True).
+        # Reset lets the sell be evaluated as a new batch.
+        if accum.copied and action == "SELL":
+            logger.info(
+                "🔄 ACCUM RESET │ %s │ %s │ sell fill arrived on copied accum "
+                "→ resetting for sell evaluation",
+                accum.whale_label, accum.token_id[:16],
+            )
+            accum.copied = False
+            # Reset USD/token counters to track only the new sell batch
+            accum.total_usd = -size_usd
+            accum.total_tokens = -size_tokens
+            accum.fill_count = 1
+            accum.first_fill_time = time.time()
+            accum.copy_at_usd = 0.0
+
         # Log del fill individual
         portfolio = self._get_whale_portfolio(whale_label)
         conv_pct = abs(accum.total_usd) / portfolio * 100 if portfolio > 0 else 0

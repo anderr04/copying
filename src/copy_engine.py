@@ -476,6 +476,29 @@ class CopyTradeEngine:
             4. Slippage check.
             5. Ejecutar.
         """
+        # ── Guard: no re-copy if we already have an open position ────
+        # cleanup_stale() can delete the PendingAccumulation after 1h of
+        # inactivity, causing new fills to create a fresh accumulation that
+        # would trigger a second copy of the same (whale, token) position.
+        pos_key = f"{accum.whale_address}:{accum.token_id}"
+        if pos_key in self._whale_positions and self._whale_positions[pos_key].copied:
+            logger.info(
+                "⏭️ SKIPPED_ALREADY_OPEN │ %s │ %s [%s] │ "
+                "ya tenemos posición abierta, ignorando re-copy",
+                accum.whale_label,
+                accum.outcome or "?",
+                accum.market_question[:40] or accum.token_id[:16],
+            )
+            return CopyTradeResult(
+                action="SKIPPED_ALREADY_OPEN",
+                whale_label=accum.whale_label,
+                token_id=accum.token_id,
+                whale_price=accum.avg_price,
+                reason="Posición ya abierta para este (whale, token).",
+                accum_usd=abs(accum.total_usd),
+                accum_fills=accum.fill_count,
+            )
+
         total_usd = abs(accum.total_usd)
         whale_portfolio = self._get_whale_portfolio(accum.whale_label)
         conviction = total_usd / whale_portfolio if whale_portfolio > 0 else 0
@@ -675,13 +698,23 @@ class CopyTradeEngine:
                 conviction_pct=conviction * 100,
             )
 
-    # ── Handle Accumulated SELL ──────────────────────────────────
+    # ── Handle Accumulated SELL (proportional) ──────────────────
 
     def _handle_accumulated_sell(
         self, accum: PendingAccumulation,
     ) -> CopyTradeResult:
         """
-        El whale ha acumulado ventas → liquidar si tenemos posición.
+        El whale ha acumulado ventas → vender PROPORCIONALMENTE.
+
+        Lógica:
+            sell_ratio = whale_sell_tokens / whale_known_position_tokens
+            - ratio >= 1.0 → liquidación completa (full close)
+            - ratio <  1.0 → venta parcial (partial close)
+
+        Después de una venta parcial, la WhalePosition se reduce
+        (size_tokens, size_usd, our_size) para reflejar la posición
+        restante. Si la posición cae por debajo de un mínimo ($0.50),
+        se liquida entera.
         """
         pos_key = f"{accum.whale_address}:{accum.token_id}"
         whale_pos = self._whale_positions.get(pos_key)
@@ -698,43 +731,55 @@ class CopyTradeEngine:
         snap = self._get_orderbook(accum.token_id)
         P_u = snap.best_bid if snap else accum.avg_price
 
+        # ── Calculate sell ratio ──────────────────────────────
+        whale_sell_tokens = abs(accum.total_tokens)
+        whale_total_tokens = whale_pos.size_tokens
+
+        if whale_total_tokens <= 0:
+            sell_ratio = 1.0
+        else:
+            sell_ratio = min(whale_sell_tokens / whale_total_tokens, 1.0)
+
+        # Clamp: if remaining would be dust, just close everything
+        MIN_REMAINING_USD = 0.50
+        remaining_usd_est = whale_pos.size_usd * (1 - sell_ratio)
+        if remaining_usd_est < MIN_REMAINING_USD:
+            sell_ratio = 1.0
+
+        is_full_liquidation = sell_ratio >= 0.99
+
         logger.info(
-            "🔻 LIQUIDACIÓN │ %s VENDE │ %s [%s] │ "
-            "Acum $%.2f (%d fills) │ bid=%.4f",
+            "%s │ %s VENDE │ %s [%s] │ "
+            "Acum $%.2f (%d fills, %.0f tokens) │ "
+            "whale_pos=%.0f tokens │ ratio=%.1f%% │ bid=%.4f",
+            "🔻 LIQUIDACIÓN" if is_full_liquidation else "📉 VENTA PARCIAL",
             accum.whale_label,
             whale_pos.outcome or "?",
             whale_pos.market_question[:40] or accum.token_id[:16] + "…",
-            abs(accum.total_usd), accum.fill_count, P_u,
+            abs(accum.total_usd), accum.fill_count, whale_sell_tokens,
+            whale_total_tokens, sell_ratio * 100, P_u,
         )
 
-        synth_signal = WhaleTradeSignal(
-            tx_hash=accum.last_tx_hash,
-            block_number=0,
-            whale_address=accum.whale_address,
-            whale_label=accum.whale_label,
-            whale_role="accumulated",
-            token_id=accum.token_id,
-            action="SELL",
-            price=accum.avg_price,
-            size_tokens=abs(accum.total_tokens),
-            size_usd=abs(accum.total_usd),
-            fee_usd=0.0,
-        )
-
-        success = self._execute_sell(synth_signal, snap)
-
-        if success:
-            del self._whale_positions[pos_key]
-            self._liquidations_executed += 1
-            self.save_whale_positions()
-            return CopyTradeResult(
-                action="LIQUIDATED",
+        # ── Execute ───────────────────────────────────────────
+        success = self._execute_sell(
+            signal=WhaleTradeSignal(
+                tx_hash=accum.last_tx_hash,
+                block_number=0,
+                whale_address=accum.whale_address,
                 whale_label=accum.whale_label,
+                whale_role="accumulated",
                 token_id=accum.token_id,
-                whale_price=accum.avg_price,
-                our_price=P_u,
-            )
-        else:
+                action="SELL",
+                price=accum.avg_price,
+                size_tokens=whale_sell_tokens,
+                size_usd=abs(accum.total_usd),
+                fee_usd=0.0,
+            ),
+            snap=snap,
+            sell_fraction=sell_ratio,
+        )
+
+        if not success:
             return CopyTradeResult(
                 action="SKIPPED_UNKNOWN",
                 whale_label=accum.whale_label,
@@ -743,6 +788,30 @@ class CopyTradeEngine:
                 our_price=P_u,
                 reason="Error al liquidar.",
             )
+
+        self._liquidations_executed += 1
+
+        if is_full_liquidation:
+            # Full close → remove whale position entirely
+            del self._whale_positions[pos_key]
+            action = "LIQUIDATED"
+        else:
+            # Partial close → shrink whale position
+            whale_pos.size_tokens *= (1 - sell_ratio)
+            whale_pos.size_usd    *= (1 - sell_ratio)
+            whale_pos.our_size    *= (1 - sell_ratio)
+            action = "PARTIAL_SELL"
+
+        self.save_whale_positions()
+        return CopyTradeResult(
+            action=action,
+            whale_label=accum.whale_label,
+            token_id=accum.token_id,
+            whale_price=accum.avg_price,
+            our_price=P_u,
+            slippage_pct=sell_ratio,  # reuse field to report ratio
+            reason=f"Sell {sell_ratio:.0%} of position",
+        )
 
     # ── Ejecución ────────────────────────────────────────────────
 
@@ -758,12 +827,13 @@ class CopyTradeEngine:
 
     def _execute_sell(
         self, signal: WhaleTradeSignal, snap: Optional[OrderbookSnapshot],
+        *, sell_fraction: float = 1.0,
     ) -> bool:
         """Ejecuta una venta/liquidación (paper o live)."""
         if self.mode == "paper":
-            return self._paper_sell(signal, snap)
+            return self._paper_sell(signal, snap, sell_fraction=sell_fraction)
         else:
-            return self._live_sell(signal, snap)
+            return self._live_sell(signal, snap, sell_fraction=sell_fraction)
 
     def _paper_buy(
         self, signal: WhaleTradeSignal, snap: OrderbookSnapshot,
@@ -806,8 +876,9 @@ class CopyTradeEngine:
 
     def _paper_sell(
         self, signal: WhaleTradeSignal, snap: Optional[OrderbookSnapshot],
+        *, sell_fraction: float = 1.0,
     ) -> bool:
-        """Venta / liquidación via PaperTrader por whale."""
+        """Venta / liquidación via PaperTrader por whale (proporcional)."""
         whale_label = signal.whale_label
         trader = self.whale_traders.get(whale_label)
         token_id = signal.token_id
@@ -819,12 +890,23 @@ class CopyTradeEngine:
             return False
 
         exit_price = snap.best_bid if snap else signal.price
-        closed = trader.close_trade(
-            exit_price=exit_price,
-            reason=f"Whale {signal.whale_label} liquidó posición",
-            is_maker=False,
-            token_id=token_id,
-        )
+        reason = f"Whale {signal.whale_label} {'liquidó' if sell_fraction >= 0.99 else 'vendió parcial'} posición"
+
+        if sell_fraction >= 0.99:
+            closed = trader.close_trade(
+                exit_price=exit_price,
+                reason=reason,
+                is_maker=False,
+                token_id=token_id,
+            )
+        else:
+            closed = trader.partial_close_trade(
+                token_id=token_id,
+                fraction=sell_fraction,
+                exit_price=exit_price,
+                reason=reason,
+                is_maker=False,
+            )
         return closed is not None
 
     def _live_buy(
@@ -847,11 +929,12 @@ class CopyTradeEngine:
 
     def _live_sell(
         self, signal: WhaleTradeSignal, snap: Optional[OrderbookSnapshot],
+        *, sell_fraction: float = 1.0,
     ) -> bool:
         """Venta via LiveExecutor (py-clob-client stub)."""
         pos_key = f"{signal.whale_address}:{signal.token_id}"
         whale_pos = self._whale_positions.get(pos_key)
-        size = whale_pos.our_size if whale_pos else 0
+        size = (whale_pos.our_size if whale_pos else 0) * sell_fraction
         price = snap.best_bid if snap else signal.price
         return self.live.sell(
             token_id=signal.token_id,

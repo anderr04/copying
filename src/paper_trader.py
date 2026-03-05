@@ -311,6 +311,114 @@ class PaperTrader:
         )
         return pos
 
+    # ── Partial close (proportional sell) ─────────────────────────
+
+    def partial_close_trade(
+        self,
+        token_id: str,
+        fraction: float,           # 0.0 – 1.0  (proportion of shares to sell)
+        exit_price: float,
+        reason: str = "",
+        is_maker: bool = False,
+    ) -> Optional[Position]:
+        """
+        Sell *fraction* of an open position, keeping the remainder open.
+
+        If fraction >= 1.0 (or remaining shares would be dust), delegates to
+        full close_trade().
+
+        Returns a synthetic Position representing the *closed slice* (for CSV
+        logging), or None on error.  The original Position stays in
+        open_positions with reduced size/cost.
+        """
+        if token_id not in self.open_positions:
+            logger.warning("partial_close: no open position for token %s…", token_id[:16])
+            return None
+
+        pos = self.open_positions[token_id]
+        fraction = max(0.0, min(fraction, 1.0))
+
+        # If fraction is essentially full → delegate to close_trade
+        if fraction >= 0.99 or pos.size * (1 - fraction) < 0.01:
+            return self.close_trade(
+                exit_price=exit_price, reason=reason,
+                is_maker=is_maker, token_id=token_id,
+            )
+
+        sold_shares = pos.size * fraction
+        sold_cost   = pos.cost * fraction
+
+        # ── Friction ──────────────────────────────────────────
+        if is_maker:
+            effective_exit = exit_price
+            exit_fee = 0.0
+            exit_slippage = 0.0
+        else:
+            slippage_cost = exit_price * self.slippage_pct
+            effective_exit = max(exit_price - slippage_cost, 0.001)
+            exit_fee_rate = calculate_dynamic_fee(exit_price)
+            exit_fee = (effective_exit * sold_shares) * exit_fee_rate
+            exit_slippage = slippage_cost * sold_shares
+
+        # PnL for the sold slice
+        pnl_slice = (effective_exit - pos.entry_price) * sold_shares - exit_fee
+        proceeds  = sold_cost + pnl_slice
+        self.available_capital += max(proceeds, 0.0)
+
+        # ── Build a synthetic closed Position for CSV logging ─
+        closed_slice = Position(
+            market_id=pos.market_id,
+            market_question=pos.market_question,
+            token_id=pos.token_id,
+            side=pos.side,
+            entry_price=pos.entry_price,
+            raw_ask=pos.raw_ask,
+            size=sold_shares,
+            cost=sold_cost,
+            entry_fee=pos.entry_fee * fraction,
+            entry_slippage=pos.entry_slippage * fraction,
+            entry_time=pos.entry_time,
+            exit_price=effective_exit,
+            exit_time=time.time(),
+            exit_fee=exit_fee,
+            exit_slippage=exit_slippage if not is_maker else 0.0,
+            pnl=pnl_slice,
+            exit_reason=reason,
+            ob_imbalance=pos.ob_imbalance,
+            yes_liquidity=pos.yes_liquidity,
+            no_liquidity=pos.no_liquidity,
+            entry_spread_pct=pos.entry_spread_pct,
+            time_elapsed_s=pos.time_elapsed_s,
+            spike_velocity=pos.spike_velocity,
+            vwap_slip_impact=pos.vwap_slip_impact,
+        )
+        self.closed_trades.append(closed_slice)
+
+        # ── Shrink the remaining position in place ────────────
+        pos.size -= sold_shares
+        pos.cost -= sold_cost
+        pos.entry_fee   *= (1 - fraction)
+        pos.entry_slippage *= (1 - fraction)
+        self._save_state()
+
+        emoji = "\U0001f4b0" if pnl_slice >= 0 else "\U0001f4b8"  # 💰 / 💸
+        logger.info(
+            "%s PAPER PARTIAL CLOSE [%.0f%%] | %s | entry=%.4f → exit=%.4f "
+            "| PnL=%.2f | sold_shares=%.2f / remaining=%.2f "
+            "| reason=%s | capital=%.2f",
+            emoji,
+            fraction * 100,
+            pos.side.name,
+            pos.entry_price,
+            effective_exit,
+            pnl_slice,
+            sold_shares,
+            pos.size,
+            reason,
+            self.available_capital,
+        )
+        return closed_slice
+
     # ── Portfolio stats ──────────────────────────────────────────
 
     def get_snapshot(self) -> PortfolioSnapshot:

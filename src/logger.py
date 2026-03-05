@@ -119,7 +119,7 @@ class TradeLogger:
             "market_question": position.market_question,
             "side": position.side.name,
             "entry_price": f"{position.entry_price:.6f}",
-            "exit_price": f"{position.exit_price:.6f}" if position.exit_price else "",
+            "exit_price": f"{position.exit_price:.6f}" if position.exit_price is not None else "",
             "shares": f"{position.size:.4f}",
             "cost": f"{position.cost:.4f}",
             "pnl": f"{position.pnl:.4f}",
