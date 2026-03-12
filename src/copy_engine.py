@@ -32,7 +32,7 @@ from src.token_registry import TokenRegistry
 from src.accumulation import AccumulationTracker, PendingAccumulation
 from src.polymarket_api import PolymarketClient, OrderbookSnapshot
 from src.paper_trader import PaperTrader
-from src.strategy import Side
+from src.paper_trader import Side
 from src.fees import calculate_dynamic_fee
 
 logger = logging.getLogger(__name__)

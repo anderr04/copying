@@ -54,6 +54,7 @@ class TradeLogger:
 
     def __init__(self, csv_path: Path = config.TRADES_CSV):
         self.csv_path = csv_path
+        self._logged_trade_ids: set[str] = set()  # dedup guard
         self._ensure_csv_headers()
 
     def _ensure_csv_headers(self) -> None:
@@ -111,7 +112,13 @@ class TradeLogger:
             return None
 
     def log_trade(self, position: Position, capital_after: float) -> None:
-        """Append a single closed trade to the CSV."""
+        """Append a single closed trade to the CSV (with dedup guard)."""
+        # ── Dedup guard: skip if this exact trade was already logged ──
+        trade_id = f"{position.market_id}:{position.entry_time}:{position.token_id}"
+        if trade_id in self._logged_trade_ids:
+            logger.debug("Skipping duplicate CSV write for trade: %s", trade_id)
+            return
+        self._logged_trade_ids.add(trade_id)
         row = {
             "timestamp_open": position.entry_time,
             "timestamp_close": position.exit_time,

@@ -21,9 +21,17 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
 
+from enum import Enum, auto
+
 import config
-from src.strategy import Side
 from src.fees import calculate_dynamic_fee
+
+
+# ── Side Enum (canonical definition) ─────────────────────────────────
+
+class Side(Enum):
+    YES = auto()
+    NO = auto()
 
 logger = logging.getLogger(__name__)
 

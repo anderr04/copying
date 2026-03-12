@@ -1,0 +1,36 @@
+# ── Python bytecode ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+
+# ── Entorno virtual ──────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env.local
+
+# ── Secrets / configuración sensible ────────────────────────────────
+.env
+*.key
+secrets.json
+
+# ── Datos del bot (logs, estados, trades) ───────────────────────────
+datos_copying/
+data/
+*.log
+*.csv
+
+# ── Snapshots y backups automáticos ─────────────────────────────────
+trades_*.csv
+state_*.tmp
+
+# ── IDEs ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── OS ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

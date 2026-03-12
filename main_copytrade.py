@@ -235,7 +235,6 @@ def main() -> None:
 
     signals_count = 0
     last_status = time.time()
-    last_loud_status = time.time()
     last_resolution_check = 0.0  # force first check on startup
 
     try:
@@ -279,14 +278,10 @@ def main() -> None:
             try:
                 sig = signal_queue.get(timeout=1.0)
             except queue.Empty:
-                if time.time() - last_status > 30:
+                if time.time() - last_status > 300:
                     for label, trader in whale_traders.items():
                         logger.info(f"HEARTBEAT 🐋 {label}: {len(trader.open_positions)} posiciones, capital ${trader.available_capital:.2f}")
                     last_status = time.time()
-                if time.time() - last_loud_status > 300:
-                    for label, trader in whale_traders.items():
-                        logger.info(f"LOUD STATUS 🐋 {label}: {len(trader.open_positions)} posiciones, capital ${trader.available_capital:.2f}")
-                    last_loud_status = time.time()
                 continue
 
             signals_count += 1
