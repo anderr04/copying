@@ -12,7 +12,7 @@ env/
 .env.local
 
 # ── Secrets / configuración sensible ────────────────────────────────
-.env
+# .env  ← incluido en repo (privado, sin claves de firma)
 *.key
 secrets.json
 
