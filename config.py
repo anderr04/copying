@@ -137,7 +137,11 @@ _cfg_logger.info("Loaded %d whale wallets: %s", len(WHALE_WALLETS), list(WHALE_W
 # La convicción mide: "¿qué % de su capital ACTIVO arriesga en este trade?"
 # Si apuesta $8K teniendo $645K activos → conv = 1.24% → señal fuerte.
 WHALE_PORTFOLIOS: dict[str, float] = {
-    "DrPufferfish": 1_000_000.0,   # Portfolio conservador $1M (actual: $1.244M)
+    "DrPufferfish":    1_000_000.0,   # $1M conservador (actual: ~$1.2M activos)
+    "swisstony":       2_000_000.0,   # $2M (capturas: $2.3M activos en Polymarket)
+    "RN1":               400_000.0,   # $400K (capturas: $444.5K activos)
+    "kch123":            490_000.0,   # $490K activos (dato de Grok)
+    "432614799197":       60_000.0,   # $60K (capturas: $58.1K activos — cartera pequeña pero rentable)
 }
 # Valor por defecto para wallets sin portfolio conocido.
 # $500K es conservador: evita trades proporcionalmente demasiado grandes.
