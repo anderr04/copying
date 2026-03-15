@@ -386,7 +386,7 @@ def _print_banner(
     print(f"  Max Slippage    : {config.COPY_MAX_SLIPPAGE_PCT:.0%}")
     print(f"  ── Per-Whale Capital ──")
     for lbl, trader in whale_traders.items():
-        port = config.WHALE_PORTFOLIOS.get(lbl, 0)
+        port = config.WHALE_PORTFOLIOS.get(lbl, config.DEFAULT_WHALE_PORTFOLIO_USD)
         print(f"  {lbl:16s}: €{trader.initial_capital:.0f} capital │ whale portfolio ${port:>12,.0f}")
     print(f"  ── Sizing Proporcional ──")
     print(f"  Conviction min  : {config.COPY_MIN_CONVICTION_PCT:.2%} of whale portfolio")
