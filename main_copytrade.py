@@ -142,12 +142,18 @@ def main() -> None:
 
     # Componentes
     clob_client = PolymarketClient()
-    # Per-whale PaperTrader instances (separate state files)
+    # Per-whale PaperTrader instances (dynamically created from config)
+    # Each whale gets its own PaperTrader with $100 paper capital
+    # and a separate state file under data/paper_state_{label}.json
+    paper_capital = config.INITIAL_CAPITAL  # $100 from .env
     whale_traders = {
-        'DrPufferfish': PaperTrader(initial_capital=100.0, label='DrPufferfish'),
-        'LucasMeow': PaperTrader(initial_capital=100.0, label='LucasMeow'),
-        'Tsybka': PaperTrader(initial_capital=100.0, label='Tsybka'),
+        label: PaperTrader(initial_capital=paper_capital, label=label)
+        for label in config.WHALE_WALLETS
     }
+    logger.info(
+        "📊 Created %d PaperTraders ($%.0f each): %s",
+        len(whale_traders), paper_capital, list(whale_traders.keys()),
+    )
     trade_logger = TradeLogger()
     # NO wipe CSV — preserve historical data across restarts
 

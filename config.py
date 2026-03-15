@@ -121,26 +121,28 @@ if not WHALE_WALLETS:
         "DrPufferfish": "0xdb27bf2ac5d428a9c63dbc914611036855a6c56e",
     }
 
+# Log de wallets cargadas al arrancar.
+import logging as _logging
+_cfg_logger = _logging.getLogger(__name__)
+_cfg_logger.info("Loaded %d whale wallets: %s", len(WHALE_WALLETS), list(WHALE_WALLETS.keys()))
+
 # ── Copy-Trading Parameters ──────────────────────────────────────────
 
 # --- Portfolio proporcional (whale → nosotros) ---
 # Tamaño estimado del portfolio de cada whale (USD).
-# IMPORTANTE: Usamos POSICIONES ACTIVAS, no ganancias totales.
-# DrPufferfish tiene $6.24M de profit lifetime, pero solo $645K desplegados ahora.
+# Solo incluimos wallets con portfolio conocido.
+# Los wallets del scanner usan DEFAULT_WHALE_PORTFOLIO_USD ($500K conservador)
+# porque no conocemos su portfolio real — mejor sub-estimar para no sobre-copiar.
+#
 # La convicción mide: "¿qué % de su capital ACTIVO arriesga en este trade?"
 # Si apuesta $8K teniendo $645K activos → conv = 1.24% → señal fuerte.
-# Si usáramos $6.24M → conv = 0.13% → señal invisible (incorrecto).
-#
-# Actualizar estos valores periódicamente mirando sus perfiles en Polymarket.
-# Valores conservadores y redondeados (actual: DrPufferfish $1.244M, LucasMeow $900K, Tsybka $31K).
 WHALE_PORTFOLIOS: dict[str, float] = {
     "DrPufferfish": 1_000_000.0,   # Portfolio conservador $1M (actual: $1.244M)
-    "LucasMeow":     600_000.0,   # Portfolio conservador $600K (actual: $900K)
-    "Tsybka":        300_000.0,   # Portfolio conservador $300K (actual: $31K → evitar over-sizing)
 }
-# Valor por defecto si un whale no está en WHALE_PORTFOLIOS.
+# Valor por defecto para wallets sin portfolio conocido.
+# $500K es conservador: evita trades proporcionalmente demasiado grandes.
 DEFAULT_WHALE_PORTFOLIO_USD: float = float(
-    os.getenv("DEFAULT_WHALE_PORTFOLIO_USD", "1000000.0")
+    os.getenv("DEFAULT_WHALE_PORTFOLIO_USD", "500000.0")
 )
 
 # Convicción mínima (% del portfolio del whale) para considerar un trade.
