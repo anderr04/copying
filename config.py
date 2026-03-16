@@ -137,11 +137,16 @@ _cfg_logger.info("Loaded %d whale wallets: %s", len(WHALE_WALLETS), list(WHALE_W
 # La convicción mide: "¿qué % de su capital ACTIVO arriesga en este trade?"
 # Si apuesta $8K teniendo $645K activos → conv = 1.24% → señal fuerte.
 WHALE_PORTFOLIOS: dict[str, float] = {
-    "DrPufferfish":    1_000_000.0,   # $1M conservador (actual: ~$1.2M activos)
-    "swisstony":       2_000_000.0,   # $2M (capturas: $2.3M activos en Polymarket)
-    "RN1":               400_000.0,   # $400K (capturas: $444.5K activos)
-    "kch123":            490_000.0,   # $490K activos (dato de Grok)
-    "432614799197":       60_000.0,   # $60K (capturas: $58.1K activos — cartera pequeña pero rentable)
+    "DrPufferfish":    1_200_000.0,   # $1.2M activos (Grok: $1.23M)
+    "swisstony":       2_000_000.0,   # $2M (Polymarket: $2.3M activos)
+    "RN1":               400_000.0,   # $400K (Polymarket: $444.5K activos)
+    "kch123":            830_000.0,   # $830K activos (Grok: $828K)
+    "432614799197":       60_000.0,   # $60K activos (Polymarket: $58.1K)
+    "YatSen":            600_000.0,   # $600K activos (Grok: $597K)
+    "ImJustKen":         650_000.0,   # $650K activos (Grok: $656K)
+    "Countryside":       500_000.0,   # $500K activos (Grok)
+    "aenews2":           240_000.0,   # $240K activos (Grok: $241K)
+    "GCottrell93":       110_000.0,   # $110K activos (Grok: $112K — ultra sniper)
 }
 # Valor por defecto para wallets sin portfolio conocido.
 # $500K es conservador: evita trades proporcionalmente demasiado grandes.
