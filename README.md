@@ -1,103 +1,98 @@
-# Polymarket BTC 5-min Scalping Bot
+# Polymarket Whale Copy-Trading Bot
 
-> **Phase 1 – Paper Trading Only**
-> Este bot **no** envía órdenes reales. Lee el orderbook público de Polymarket y simula operaciones con un capital virtual.
+> **Architecture v2 — Zero-RPC & Proportional Sizing**
+> Bot avanzado de copy-trading algorítmico diseñado para Polymarket. Sigue en tiempo real a decenas de "Smart Money" wallets utilizando una arquitectura WSS de coste RPC cero y un sistema matemático de convicción proporcional.
 
 ---
 
-## Estructura del Proyecto
+## 🏗 Arquitectura del Sistema
 
-```
-├── main.py                 # Orquestador principal (entry point)
-├── config.py               # Parámetros de configuración centralizados
-├── requirements.txt        # Dependencias de Python
-├── .env_example            # Plantilla de variables de entorno
-├── README.md               # Este archivo
-├── src/
-│   ├── __init__.py
-│   ├── polymarket_api.py   # Conexión a la API CLOB + Gamma de Polymarket
-│   ├── strategy.py         # Lógica de la estrategia de momentum scalping
-│   ├── paper_trader.py     # Gestor de capital virtual y ejecución simulada
-│   └── logger.py           # Logging a CSV + consola + archivo
-└── data/
-    ├── .gitkeep
-    ├── trades.csv           # (auto-generado) Log de todas las operaciones
-    └── bot.log              # (auto-generado) Log detallado del bot
-```
+El bot está diseñado para ser extremadamente eficiente y 100% resistente al ruido algorítmico, utilizando dos pilares fundamentales:
 
-## Estrategia: Momentum Scalping
+### 1. Zero-RPC (Topic-Filtered WebSocket)
+En lugar de descargar cada bloque de la blockchain de Polygon y usar miles de peticiones `eth_getTransactionByHash` para decodificar quién opera, el bot utiliza un filtro a nivel de nodo de Alchemy.
+- Se suscribe a los eventos del `CTFExchange` y `NegRiskExchange`.
+- Filtra instantáneamente *solo* los eventos donde el Maker o Taker coinciden con nuestra lista de `WHALE_WALLETS`.
+- **Resultado**: Cero consumo de créditos RPC repetitivos, latencia < 1ms, y capacidad para vigilar docenas de carteras simultáneamente de forma gratuita.
 
-1. **Espera** – Tras detectar un mercado de 5 min, espera ~30 s para dejar que se forme el precio inicial.
-2. **Observación** – Muestrea el mid-price del token YES a intervalos regulares.
-3. **Señal de entrada** – Si la probabilidad se mueve ≥ 8% (configurable) hacia un lado:
-   - Probabilidad subiendo → **Compra YES**
-   - Probabilidad bajando → **Compra NO**
-4. **Gestión de posición**:
-   - **Take-profit**: cierra cuando el precio se mueve +3 pp a nuestro favor.
-   - **Stop-loss**: cierra cuando se mueve -4 pp en contra.
-   - **Timeout de seguridad**: cierra tras 180 s (NUNCA mantener hasta resolución).
-5. **Regla de oro**: NUNCA mantener la posición hasta que cierre el mercado.
+### 2. Proportional Sizing & Conviction Tracking
+No seguimos a ciegas. El bot evalúa el tamaño del trade del whale relativo a su portfolio estimado total para medir su **"Convicción"**.
+- Si un whale con $1M mete $1,000 → Convicción del 0.1%
+- **Filtro de Ruido**: Todo trade con convicción < 0.1% es descartado (Market Making, exploración, farmeo).
+- **Ejecución Proporcional**: Si supera el filtro, el bot escala la convicción a nuestro capital (ej. multiplicador 30x).
+- **Agrupación (Batching)**: Agrupa múltiples fills pequeños del whale durante una ventana de 120s antes de ejecutar la copia, evitando el problema del "Scale-In".
 
-## Instalación
+---
+
+## 🛠 Instalación y Configuración
+
+### 1. Preparar el entorno
 
 ```bash
-# 1. Crear entorno virtual (recomendado)
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/Mac
+# Crear entorno virtual
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
 
-# 2. Instalar dependencias
+# Instalar dependencias
 pip install -r requirements.txt
-
-# 3. (Opcional) Copiar la plantilla de entorno
-copy .env_example .env
 ```
 
-## Uso
+### 2. Configurar Variables de Entorno (`.env`)
 
-```bash
-# Ejecutar en modo continuo (busca mercados en bucle)
-python main.py
+Renombra `.env_example` a `.env` y añade tus credenciales. La configuración de las wallets sigue este formato: `NombreWallet:0xDireccionEVM;OtraWallet:0xDireccion...`
 
-# Ejecutar un solo ciclo (un mercado) y salir
-python main.py --once
+```env
+# ── Alchemy (Polygon) ──
+POLYGON_WSS_URL=wss://polygon-mainnet.g.alchemy.com/v2/TU_API_KEY_AQUI
+
+# ── Whale Wallets ──
+# Separa múltiples wallets con punto y coma (;)
+WHALE_WALLETS="DrPufferfish:0xdb27bf2ac5d428a9c63dbc914611036855a6c56e;swisstony:0x204f72f35326db932158cba6adff0b9a1da95e14"
+
+# ── Copy-Trading Parameters ──
+COPY_MAX_SLIPPAGE_PCT=0.05
+COPY_POSITION_SIZE_PCT=0.10
+COPY_MIN_WHALE_SIZE_USD=100.0
+COPY_MODE=paper
+
+INITIAL_CAPITAL=100.0
 ```
 
-Pulsa `Ctrl+C` para detener el bot de forma limpia.
+### 3. Configurar Portfolios (`config.py`)
 
-## Configuración
-
-Todos los parámetros se pueden ajustar en `config.py` o mediante variables de entorno en `.env`:
-
-| Parámetro | Default | Descripción |
-|---|---|---|
-| `INITIAL_CAPITAL` | 50.0 | Capital virtual inicial (€) |
-| `WAIT_SECONDS` | 30 | Segundos de espera tras apertura del mercado |
-| `MOMENTUM_THRESHOLD` | 0.08 | Cambio mínimo en probabilidad para señal (8 pp) |
-| `TAKE_PROFIT` | 0.03 | Distancia de take-profit (3 pp) |
-| `STOP_LOSS` | 0.04 | Distancia de stop-loss (4 pp) |
-| `POSITION_SIZE_PCT` | 0.20 | Fracción del capital por operación (20%) |
-| `MAX_HOLD_SECONDS` | 180 | Tiempo máximo de mantenimiento de posición |
-
-## Revisión de Resultados
-
-Las operaciones se guardan automáticamente en `data/trades.csv`. Se puede analizar con pandas:
+Para que la matemática de convicción funcione correctamente, debes asignar el capital activo estimado de cada ballena en `config.py`:
 
 ```python
-import pandas as pd
-df = pd.read_csv("data/trades.csv")
-print(df[["side", "entry_price", "exit_price", "pnl", "exit_reason"]])
-print(f"PnL total: {df['pnl'].sum():.2f} €")
+WHALE_PORTFOLIOS: dict[str, float] = {
+    "DrPufferfish": 1_200_000.0,
+    "swisstony":    2_000_000.0,
+}
+# Las carteras no especificadas usarán DEFAULT_WHALE_PORTFOLIO_USD ($500.000)
 ```
-
-## Próximos Pasos (Fase 2)
-
-- [ ] Modelo de slippage basado en la profundidad del orderbook
-- [ ] Conexión WebSocket para datos en tiempo real
-- [ ] Integración con `py-clob-client` para enviar órdenes reales
-- [ ] Panel de control en tiempo real (Streamlit / Grafana)
-- [ ] Backtest con datos históricos
 
 ---
 
-**⚠️ Disclaimer**: Este software es solo para fines educativos y de investigación. El trading conlleva riesgos significativos. No inviertas dinero que no puedas permitirte perder.
+## 🚀 Uso
+
+Ejecuta el orquestador principal:
+
+```bash
+python main_copytrade.py
+```
+
+El bot iniciará `PaperTrader` independientes virtuales para cada whale monitorizada.
+
+Pulsa `Ctrl+C` para detener el bot. El estado de cada *PaperTrader* se guardará automáticamente en disco (`data/paper_state_*.json`) y se recuperará en el próximo reinicio.
+
+---
+
+## 📊 Revisión de Resultados
+
+Todas las ejecuciones de copy-trade y liquidaciones se registran en:
+- `data/trades.csv` (Registro detallado CSV para Pandas/Excel)
+- `data/bot.log` (Log técnico rotativo)
+
+---
+
+**⚠️ Disclaimer**: Software para investigación algorítmica y DeFi. El autor no se hace responsable de las pérdidas de capital reales incurridas en modo "live".
