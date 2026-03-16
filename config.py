@@ -164,14 +164,21 @@ COPY_MIN_CONVICTION_PCT: float = float(
 # Multiplicador de convicción.
 # Escala la convicción del whale a nuestro bankroll:
 #   our_size = conviction × multiplier × our_capital
-# Ej: whale pone 1% de su portfolio → nosotros ponemos 1% × 30 = 30% del nuestro.
+# Ej: whale pone 1% de su portfolio → nosotros ponemos 1% × 10 = 10% del nuestro.
+# Con $100 de capital:
+#   - trade mínimo (0.1% conv) → $1.00 → cómodo, muchos trades posibles
+#   - trade agresivo (1% conv) → $10.00 → razonable
+#   - trade extremo (2% conv)  → $20.00 → tocando el techo de COPY_MAX_POSITION_PCT
+# Anteriormente 30x: agotaba el capital en 2-3 trades de alta convicción.
 COPY_CONVICTION_MULTIPLIER: float = float(
-    os.getenv("COPY_CONVICTION_MULTIPLIER", "30.0")
+    os.getenv("COPY_CONVICTION_MULTIPLIER", "10.0")
 )
 
 # Máximo % de capital por operación individual (límite de riesgo).
+# 20% → nunca más de $20 en un solo trade (sobre $100 capital).
+# Protege contra All-In de ballena ultra-sniper o un súbito spike de convicción.
 COPY_MAX_POSITION_PCT: float = float(
-    os.getenv("COPY_MAX_POSITION_PCT", "0.40")   # 40% = $20 de $50
+    os.getenv("COPY_MAX_POSITION_PCT", "0.20")   # 20% = $20 de $100
 )
 
 # Mínimo absoluto de trade en USD (Polymarket tiene mínimos prácticos).
