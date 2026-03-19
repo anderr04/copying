@@ -146,7 +146,7 @@ WHALE_PORTFOLIOS: dict[str, float] = {
     "ImJustKen":         650_000.0,   # $650K activos (Grok: $656K)
     "Countryside":       500_000.0,   # $500K activos (Grok)
     "aenews2":           240_000.0,   # $240K activos (Grok: $241K)
-    "GCottrell93":       110_000.0,   # $110K activos (Grok: $112K — ultra sniper)
+    # Macks22, NicholasWickerson, rdba → DEFAULT_WHALE_PORTFOLIO_USD ($500K)
 }
 # Valor por defecto para wallets sin portfolio conocido.
 # $500K es conservador: evita trades proporcionalmente demasiado grandes.
