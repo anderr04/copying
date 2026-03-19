@@ -140,7 +140,9 @@ WHALE_PORTFOLIOS: dict[str, float] = {
     "swisstony":       2_000_000.0,   # $2M (Polymarket: $2.3M activos)
     "RN1":               400_000.0,   # $400K (Polymarket: $444.5K activos)
     "kch123":            830_000.0,   # $830K activos (Grok: $828K)
+    "432614799197":       86_000.0,   # $86.5K posiciones reales (Polymarket)
     "ImJustKen":         650_000.0,   # $650K activos (Grok: $656K)
+    "Countryside":       400_000.0,   # $398.2K posiciones reales (Polymarket)
     "aenews2":           240_000.0,   # $240K activos (Grok: $241K)
     # Macks22, NicholasWickerson, rdba → DEFAULT_WHALE_PORTFOLIO_USD ($500K)
 }
