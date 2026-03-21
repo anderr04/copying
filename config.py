@@ -233,3 +233,23 @@ WEB3_RECONNECT_DELAY_S: float = float(os.getenv("WEB3_RECONNECT_DELAY_S", "5.0")
 # DEPRECATED: WEB3_POLL_FALLBACK_S ya no se usa (no hay HTTP polling).
 WEB3_POLL_FALLBACK_S: float = float(os.getenv("WEB3_POLL_FALLBACK_S", "2.0"))
 
+# ── IA Probability Validator (Shadow Mode) ───────────────────────────
+# When enabled, runs a background thread that validates every trade
+# signal against Ollama (local LLM) + real-world data APIs.
+# The validator NEVER blocks the main bot — it logs to shadow_trades.csv.
+VALIDATOR_ENABLED: bool = os.getenv(
+    "VALIDATOR_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+VALIDATOR_MODEL: str = os.getenv("VALIDATOR_MODEL", "phi3:mini")
+VALIDATOR_OLLAMA_URL: str = os.getenv(
+    "VALIDATOR_OLLAMA_URL", "http://localhost:11434"
+)
+VALIDATOR_TIMEOUT_S: float = float(
+    os.getenv("VALIDATOR_TIMEOUT_S", "30.0")
+)
+VALIDATOR_MIN_CONFIDENCE: int = int(
+    os.getenv("VALIDATOR_MIN_CONFIDENCE", "70")
+)
+VALIDATOR_EDGE_THRESHOLD: float = float(
+    os.getenv("VALIDATOR_EDGE_THRESHOLD", "1.45")
+)

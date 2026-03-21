@@ -168,6 +168,25 @@ def main() -> None:
     # Live executor → STUB only (no real py-clob-client connection)
     live_executor = LiveExecutor(clob_client=None)
 
+    # ── IA Probability Validator (shadow mode, optional) ────────────
+    validator = None
+    validator_queue_obj = None
+    if config.VALIDATOR_ENABLED:
+        from src.probability_validator import ProbabilityValidator
+        validator_queue_obj = queue.Queue(maxsize=100)
+        validator = ProbabilityValidator(
+            signal_queue=validator_queue_obj,
+            model=config.VALIDATOR_MODEL,
+            ollama_url=config.VALIDATOR_OLLAMA_URL,
+            timeout=config.VALIDATOR_TIMEOUT_S,
+            min_confidence=config.VALIDATOR_MIN_CONFIDENCE,
+            edge_threshold=config.VALIDATOR_EDGE_THRESHOLD,
+        )
+        logger.info(
+            "\U0001f9e0 IA Validator enabled (model=%s, shadow mode)",
+            config.VALIDATOR_MODEL,
+        )
+
     engine = CopyTradeEngine(
         clob_client=clob_client,
         token_registry=token_registry,
@@ -186,6 +205,8 @@ def main() -> None:
         conviction_multiplier=config.COPY_CONVICTION_MULTIPLIER,
         max_position_pct=config.COPY_MAX_POSITION_PCT,
         min_trade_usd=config.COPY_MIN_TRADE_USD,
+        # IA Shadow Validator
+        validator_queue=validator_queue_obj,
     )
 
     listener = BlockchainListener(
@@ -227,6 +248,8 @@ def main() -> None:
 
     # ── Iniciar Listener ─────────────────────────────────────────
     listener.start()
+    if validator:
+        validator.start()
     time.sleep(1)  # dar un momento para que conecte
 
     if not listener.is_running:
@@ -303,6 +326,8 @@ def main() -> None:
         print()
         logger.info("Deteniendo listener …")
         listener.stop()
+        if validator:
+            validator.stop()
 
         # Snapshot CSV before any shutdown processing
         trade_logger.snapshot_csv()

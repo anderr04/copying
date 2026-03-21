@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -225,6 +226,8 @@ class CopyTradeEngine:
         conviction_multiplier: float = config.COPY_CONVICTION_MULTIPLIER,
         max_position_pct: float = config.COPY_MAX_POSITION_PCT,
         min_trade_usd: float = config.COPY_MIN_TRADE_USD,
+        # ── IA Shadow Validator (optional) ─────────────────
+        validator_queue: queue.Queue | None = None,
     ):
         self.clob = clob_client
         self.registry = token_registry
@@ -248,6 +251,9 @@ class CopyTradeEngine:
         self.conviction_multiplier = conviction_multiplier
         self.max_position_pct = max_position_pct
         self.min_trade_usd = min_trade_usd
+
+        # ── IA Shadow Validator queue (non-blocking) ──────
+        self._validator_queue = validator_queue
 
         # ── Accumulation Tracker ─────────────────────────────
         self.accumulator = AccumulationTracker(
@@ -652,6 +658,24 @@ class CopyTradeEngine:
         )
 
         success = self._execute_buy(synth_signal, snap, size_usd=our_size_usd)
+
+        # ── Shadow IA validator (fire-and-forget, non-blocking) ──
+        if self._validator_queue is not None:
+            try:
+                self._validator_queue.put_nowait({
+                    "whale_label": accum.whale_label,
+                    "token_id": accum.token_id,
+                    "market_question": accum.market_question,
+                    "outcome": accum.outcome or "?",
+                    "poly_price": P_u,
+                    "whale_price": P_b,
+                    "whale_usd": total_usd,
+                    "conviction": conviction,
+                    "our_size_usd": our_size_usd,
+                    "action": "COPIED" if success else "EXEC_FAILED",
+                })
+            except queue.Full:
+                pass  # drop silently — never block the bot
 
         if success:
             pos_key = f"{accum.whale_address}:{accum.token_id}"
