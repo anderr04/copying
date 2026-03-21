@@ -144,6 +144,10 @@ WHALE_PORTFOLIOS: dict[str, float] = {
     "ImJustKen":         650_000.0,   # $650K activos (Grok: $656K)
     "Countryside":       400_000.0,   # $398.2K posiciones reales (Polymarket)
     "aenews2":           240_000.0,   # $240K activos (Grok: $241K)
+    "XieGuangKun":       227_000.0,   # $227.1K posiciones (Polymarket Mar 21)
+    "0xdD2dc":            50_000.0,   # $50.1K posiciones (Polymarket Mar 21)
+    "imjustalarp":       163_000.0,   # $162.9K posiciones (Polymarket Mar 21)
+    "Decayer":            43_000.0,   # $42.8K posiciones (Polymarket Mar 21)
     # Macks22, NicholasWickerson, rdba → DEFAULT_WHALE_PORTFOLIO_USD ($500K)
 }
 # Valor por defecto para wallets sin portfolio conocido.
